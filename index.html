@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>無限横スクロール・ジャンプゲーム</title>
+  <title>メトランナー</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
   <style>
     html, body {
@@ -43,10 +43,10 @@
     let walls = [];       // 壁（足場、押し戻し）
     let platforms = [];   // 空中床
     let items = [];       // アイテム：スコア・ひよこ・自転車・スター
-    let birds = [];       // 空の敵（鳥・爆弾・唐辛子）
+    let birds = [];       // 空の敵（コウモリ・爆弾・唐辛子）
     let bees = [];        // 空の敵：蜂（サインカーブで移動）
     let ghosts = [];      // 空の敵：オバケ（進んだり止まったり）
-    let turtles = [];     // 地上の敵（亀）
+    let turtles = [];     // 地上の敵（亀：バウンド）
     let mushrooms = [];   // 地上の敵（キノコ）
     let holes = [];       // 穴（地面の切れ目）
     let floatTexts = [];  // アイテム取得／スター攻撃時のフローティングテキスト
@@ -266,15 +266,6 @@
       return false;
     }
 
-    function getHoleCenterUnderX(centerX) {
-      for (const hole of holes) {
-        if (centerX > hole.x && centerX < hole.x + hole.width) {
-          return hole.x + hole.width / 2;
-        }
-      }
-      return null;
-    }
-
     // 指定したX（中心）が穴 or 敵 or 直前死亡ポイントの近くかどうか
     function isCenterOverHoleOrEnemy(centerX) {
       // 穴
@@ -414,9 +405,6 @@
       }
 
       if (options.respawnFromTop) {
-        const groundY = getGroundY();
-
-        // 穴＆敵＆直前死亡位置を避ける安全なXを探してリスポーン
         const safeX = findSafeRespawnX();
         player.x = safeX;
         playerBaseX = safeX;
@@ -515,13 +503,19 @@
           });
         }
       } else if (type === "turtle") {
+        // 亀：バウンドするように baseY / amp / omega / phase を持たせる
         const h = 32;
+        const baseY = groundY - h;
         turtles.push({
           x,
-          y: groundY - h,
+          baseY,
+          y: baseY,
           width: 40,
           height: h,
-          emoji: "🐢"
+          emoji: "🐢",
+          amp: randomRange(10, 30),      // 跳ね幅
+          omega: randomRange(2.0, 4.0), // 跳ねの速さ
+          phase: Math.random() * Math.PI * 2
         });
       } else if (type === "mushroom") {
         const h = 32;
@@ -550,7 +544,7 @@
         });
       } else if (type === "air") {
         const h = 32;
-        const airEmojis = ["🐦", "💣", "🌶️"];
+        const airEmojis = ["🦇", "💣", "🌶️"]; // 鳥→コウモリ
         birds.push({
           x,
           y: randomRange(80, groundY - 130),
@@ -797,12 +791,24 @@
       // 画面下まで落ちたらロスト（穴や崖落ち）
       if (player.y > canvas.height && invincibleTimer <= 0) {
         const centerX = player.x + player.width / 2;
-        const holeCenter = getHoleCenterUnderX(centerX);
-        if (holeCenter != null) {
-          lastDeathAvoidCenterX = holeCenter;
-        } else {
-          lastDeathAvoidCenterX = centerX; // 落ち地点そのものを避け対象に
+
+        // どの穴から落ちたか判定して、その穴を削除して地面に戻す
+        let removedHole = false;
+        for (let i = 0; i < holes.length; i++) {
+          const hole = holes[i];
+          if (centerX > hole.x && centerX < hole.x + hole.width) {
+            const holeCenter = hole.x + hole.width / 2;
+            lastDeathAvoidCenterX = holeCenter;
+            holes.splice(i, 1);  // この穴をなくす（次からは地面になる）
+            removedHole = true;
+            break;
+          }
         }
+        if (!removedHole) {
+          // 穴以外で落ちた場合は、その位置自体を避けポイントに
+          lastDeathAvoidCenterX = centerX;
+        }
+
         damagePlayer({ respawnFromTop: true });
       }
 
@@ -844,6 +850,12 @@
           plat.phase += plat.omega * dt;
           plat.y = plat.baseY + plat.amp * Math.sin(plat.phase);
         }
+      }
+
+      // 亀：バウンド（上下にぴょんぴょん）
+      for (const t of turtles) {
+        t.phase += t.omega * dt;
+        t.y = t.baseY - Math.abs(Math.sin(t.phase)) * t.amp;
       }
 
       // 蜂：横はスクロール、縦はサインカーブ
@@ -929,12 +941,17 @@
           return;
         }
 
-        // 自転車モード：一回だけ身代わり的に解除
+        // 自転車モード：一回だけ身代わり的に解除（敵は残す）
         if (isBikeMode) {
           isBikeMode = false;
           bikeTimer = 0;
           if (!isChickMode) player.emoji = "🏃‍♂️";
-        } else if (invincibleTimer <= 0) {
+          return;
+        }
+
+        // 通常ヒット：ライフ減＋ロスト＋その敵は消す
+        if (invincibleTimer <= 0) {
+          list.splice(index, 1); // この敵はいなくする
           damagePlayer({ respawnFromTop: true });
         }
       }
@@ -955,7 +972,7 @@
           break;
         }
       }
-      // 鳥・爆弾・唐辛子
+      // コウモリ・爆弾・唐辛子
       for (let i = 0; i < birds.length && !gameOver; i++) {
         if (rectsOverlap(playerRect, birds[i])) {
           const c = birds[i].x + birds[i].width / 2;
@@ -1037,17 +1054,24 @@
         score += dt * 5;
       }
 
-      // プレイヤーの回転（前転）
+      // プレイヤーの回転（通常／逆回転）
       const inNormalMode = !isBikeMode && !isChickMode;
-      let rollDir = 1;
-      if (isBikeMode || inNormalMode || isStarMode) {
-        // 右向き描画なので符号反転で前転に見せる
-        rollDir = -1;
+      let baseDir = 1;
+      if (isBikeMode || inNormalMode) {
+        baseDir = -1;   // 通常時はこの方向
+      } else {
+        baseDir = 1;    // ひよこモードなど
       }
+
+      let rollDir = baseDir;
       let rollSpeed = 4.0;
+
+      // ⭐中は逆回転＆高速
       if (isStarMode) {
-        rollSpeed = 10.0; // ⭐中は高速バックフリップ
+        rollDir = -baseDir;   // 通常と逆向き
+        rollSpeed = 10.0;
       }
+
       player.angle += rollDir * rollSpeed * dt;
 
       // フローティングテキスト
@@ -1081,19 +1105,25 @@
     function draw() {
       const groundY = getGroundY();
 
-      // 背景
+      // 背景（空）
       ctx.fillStyle = "#87ceeb";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // 地面
+      // 地面（穴の部分を避けて描画：穴の中に水平線が出ないようにする）
       ctx.fillStyle = "#3c7c1b";
-      ctx.fillRect(0, groundY, canvas.width, canvas.height - groundY);
-
-      // 穴（地面をくり抜く）
-      ctx.fillStyle = "#87ceeb";
-      for (const hole of holes) {
-        ctx.fillRect(hole.x, groundY, hole.width, canvas.height - groundY);
+      const sortedHoles = [...holes].sort((a, b) => a.x - b.x);
+      let currentX = 0;
+      for (const hole of sortedHoles) {
+        const segWidth = hole.x - currentX;
+        if (segWidth > 0) {
+          ctx.fillRect(currentX, groundY, segWidth, canvas.height - groundY);
+        }
+        currentX = hole.x + hole.width;
       }
+      if (currentX < canvas.width) {
+        ctx.fillRect(currentX, groundY, canvas.width - currentX, canvas.height - groundY);
+      }
+      // 穴部分は何も描かないので、そのまま背景色（空）のまま
 
       // 壁
       ctx.fillStyle = "#8b4513";
