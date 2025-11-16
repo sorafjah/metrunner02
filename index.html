@@ -38,15 +38,15 @@
     const ctx = canvas.getContext('2d');
 
     let player;
-    let playerBaseX = 0;          // 通常の固定位置X
+    let playerBaseX = 0;          // 通常の基準位置X
 
-    let walls = [];       // 壁（足場、ダメージなし・押し戻し）
+    let walls = [];       // 壁（足場、押し戻し）
     let platforms = [];   // 空中床
-    let items = [];       // 通常アイテム＋モード切替アイテム
-    let birds = [];       // 空の敵（鳥・爆弾・唐辛子をまとめる）
+    let items = [];       // アイテム：スコア・ひよこ・自転車
+    let birds = [];       // 空の敵（鳥・爆弾・唐辛子）
     let turtles = [];     // 地上の敵（亀）
     let mushrooms = [];   // 地上の敵（キノコ）
-    let holes = [];       // 穴（今は出さないがロジックは残す）
+    let holes = [];       // 穴（今は出さない）
     let floatTexts = [];  // アイテム取得時のフローティングテキスト
 
     let score = 0;
@@ -56,13 +56,13 @@
 
     let lastTime = 0;
 
-    const BASE_SCROLL_SPEED = 240;  // 基本スクロール速度（px/sec）
-    const GRAVITY = 900;            // 重力加速度（px/sec^2）
+    const BASE_SCROLL_SPEED = 240;  // スクロール基本速度（px/sec）
+    const GRAVITY = 900;            // 重力加速度
     const GROUND_RATIO = 0.8;       // 地面の高さ（画面高さに対する比率）
     const TOP_LIMIT = 20;           // 上方向の制限位置
 
     let spawnTimer = 0;
-    let nextSpawnTime = 1.0;        // 次オブジェ生成までの時間（秒）
+    let nextSpawnTime = 1.0;
 
     // --- モード管理 ---
     let isChickMode = false;
@@ -78,17 +78,21 @@
     let invincibleTimer = 0;
     const INVINCIBLE_TIME = 0.8;
 
-    // --- ジャンプ管理（2段ジャンプ） ---
-    let jumpUsesLeft = 2;
-    let isCurrentlyThrusting = false;
+    // --- ジャンプ管理 ---
+    let jumpUsesLeft = 2;              // 残りジャンプホールド回数（最大2）
+    let isCurrentlyThrusting = false;  // 今のホールドで上昇中か
 
     // --- スワイプ判定 ---
     let touchStartY = null;
 
-    // --- ロスト表示タイマー ---
-    let lostMessageTimer = 0;    // >0 のとき中央に LOST! を表示
+    // --- ロスト表示＆一時停止 ---
+    let lostMessageTimer = 0;      // LOST! 表示用
+    let isRespawnPause = false;    // ロスト演出中（スクロール停止）
+    let respawnPauseTimer = 0;     // 一時停止時間
 
-    // --- サウンド（BGM + イベント音） ---
+    // ==========================
+    // サウンド（BGM + イベント音）
+    // ==========================
     let audioCtx = null;
     let bgmOsc1 = null;
     let bgmOsc2 = null;
@@ -109,7 +113,7 @@
       }
     }
 
-    // 全体BGM（シンプルな2音ループ）
+    // 全体BGM：小さい2音ループ
     function startBGM() {
       if (!audioCtx || bgmOsc1) return;
 
@@ -122,7 +126,7 @@
       bgmOsc1.frequency.value = 220; // A3
       bgmOsc2.frequency.value = 330; // E4
 
-      bgmGain.gain.value = 0.04; // 小さめ音量
+      bgmGain.gain.value = 0.04;
 
       bgmOsc1.connect(bgmGain);
       bgmOsc2.connect(bgmGain);
@@ -147,41 +151,50 @@
       bgmGain = null;
     }
 
-    // 効果音（短いBGM風）
-    function playBeep(frequency, duration, type = "sine") {
+    // 汎用ビープ
+    function playBeep(f, duration, type = "sine", volume = 0.3) {
       if (!audioCtx) return;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
       osc.type = type;
-      osc.frequency.value = frequency;
+      osc.frequency.value = f;
       osc.connect(gain);
       gain.connect(audioCtx.destination);
 
       const now = audioCtx.currentTime;
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.3, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
       gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
       osc.start(now);
       osc.stop(now + duration + 0.05);
     }
 
-    function playItemSound() {
-      playBeep(880, 0.15);
+    // イベント別サウンド
+    function playScoreItemSound() {        // 食べ物アイテム
+      playBeep(880, 0.10, "sine", 0.25);
+      setTimeout(() => playBeep(1320, 0.10, "sine", 0.2), 90);
     }
 
-    function playChickSound() {
-      playBeep(660, 0.10);
-      setTimeout(() => playBeep(990, 0.12), 120);
+    function playChickSound() {            // ひよこアイテム
+      playBeep(660, 0.12, "triangle", 0.3);
+      setTimeout(() => playBeep(990, 0.12, "triangle", 0.25), 120);
     }
 
-    function playBikeSound() {
-      playBeep(440, 0.10);
-      setTimeout(() => playBeep(660, 0.12), 120);
+    function playBikeSound() {             // 自転車アイテム
+      playBeep(440, 0.10, "square", 0.3);
+      setTimeout(() => playBeep(660, 0.10, "square", 0.25), 110);
+      setTimeout(() => playBeep(880, 0.10, "square", 0.2), 220);
     }
 
-    function playHitSound() {
-      playBeep(220, 0.40, "square");
+    function playBikeBonusSound() {        // 自転車中に自転車を取って+20
+      playBeep(1200, 0.08, "sawtooth", 0.3);
+      setTimeout(() => playBeep(1600, 0.12, "sawtooth", 0.25), 80);
+    }
+
+    function playHitSound() {              // ロスト時
+      playBeep(220, 0.25, "square", 0.35);
+      setTimeout(() => playBeep(180, 0.25, "square", 0.3), 180);
     }
 
     // ==========================
@@ -242,6 +255,8 @@
       prevIsTouching = false;
 
       lostMessageTimer = 0;
+      isRespawnPause = false;
+      respawnPauseTimer = 0;
     }
 
     // ==========================
@@ -301,25 +316,21 @@
         if (chickTimer <= 0) {
           isChickMode = false;
           chickTimer = 0;
-          if (!isBikeMode) {
-            player.emoji = "🏃‍♂️";
-          }
+          if (!isBikeMode) player.emoji = "🏃‍♂️";
         }
       }
-
       if (isBikeMode) {
         bikeTimer -= dt;
         if (bikeTimer <= 0) {
           isBikeMode = false;
           bikeTimer = 0;
-          if (!isChickMode) {
-            player.emoji = "🏃‍♂️";
-          }
+          if (!isChickMode) player.emoji = "🏃‍♂️";
         }
       }
     }
 
     function getCurrentScrollSpeed() {
+      if (isRespawnPause) return 0; // ロスト中はスクロール停止
       let speed = BASE_SCROLL_SPEED;
       if (isChickMode) speed = BASE_SCROLL_SPEED * 0.6;
       if (isBikeMode)  speed = BASE_SCROLL_SPEED * 1.3;
@@ -343,18 +354,23 @@
         return;
       }
 
-      // respawnFromTop: 左に押し出されてロストしたときなど
+      // respawnFromTop のとき：スクロール一時停止 & 上から新しい自分
       if (options.respawnFromTop) {
+        const groundY = getGroundY();
         player.x = playerBaseX;
         player.y = -player.height - 10;
         player.vy = 300;
         player.onGround = false;
-        // ロスト後は人間に戻す（モード解除）
+
+        // モード解除して人間に戻す
         isChickMode = false;
         chickTimer = 0;
         isBikeMode = false;
         bikeTimer = 0;
         player.emoji = "🏃‍♂️";
+
+        isRespawnPause = true;
+        respawnPauseTimer = 1.2; // 停止中の時間（秒）
       }
     }
 
@@ -366,8 +382,9 @@
       const x = canvas.width + 40;
       const r = Math.random();
 
-      if (r < 0.2) {
-        // 通常アイテム（食べ物）
+      // アイテム出現率を全体的に増やす
+      if (r < 0.30) {
+        // スコアアイテム（食べ物）
         const foodEmojis = ["🍎", "🍌", "🍕", "🍩", "🍔", "🍇", "🍰", "🍖"];
         items.push({
           type: "score",
@@ -377,7 +394,7 @@
           height: 28,
           emoji: foodEmojis[Math.floor(Math.random() * foodEmojis.length)]
         });
-      } else if (r < 0.28) {
+      } else if (r < 0.42) {
         // ひよこアイテム
         items.push({
           type: "chick",
@@ -387,7 +404,7 @@
           height: 30,
           emoji: "🐣"
         });
-      } else if (r < 0.36) {
+      } else if (r < 0.54) {
         // 自転車アイテム
         items.push({
           type: "bike",
@@ -397,7 +414,7 @@
           height: 34,
           emoji: "🚲"
         });
-      } else if (r < 0.50) {
+      } else if (r < 0.66) {
         // 通常の壁
         const wallHeight = randomRange(50, 140);
         walls.push({
@@ -406,8 +423,8 @@
           width: 40,
           height: wallHeight
         });
-      } else if (r < 0.60) {
-        // 階段状の壁（2〜3段）
+      } else if (r < 0.76) {
+        // 階段状の壁
         const stepCount = Math.random() < 0.5 ? 2 : 3;
         const stepWidth = 40;
         const stepHeight = 35;
@@ -420,8 +437,8 @@
             height: h
           });
         }
-      } else if (r < 0.70) {
-        // 亀（地上の敵）
+      } else if (r < 0.84) {
+        // 亀
         const h = 32;
         turtles.push({
           x,
@@ -430,8 +447,8 @@
           height: h,
           emoji: "🐢"
         });
-      } else if (r < 0.80) {
-        // キノコ（地上の敵）
+      } else if (r < 0.92) {
+        // キノコ
         const h = 32;
         mushrooms.push({
           x,
@@ -440,7 +457,7 @@
           height: h,
           emoji: "🍄"
         });
-      } else if (r < 0.95) {
+      } else if (r < 0.985) {
         // 空の敵：鳥＋爆弾＋唐辛子
         const h = 32;
         const airEmojis = ["🐦", "💣", "🌶️"];
@@ -550,7 +567,7 @@
 
       const groundY = getGroundY();
 
-      // 無敵・ロスト表示タイマー
+      // 無敵・ロスト表示・リスポーン一時停止タイマー
       if (invincibleTimer > 0) {
         invincibleTimer -= dt;
         if (invincibleTimer < 0) invincibleTimer = 0;
@@ -558,6 +575,10 @@
       if (lostMessageTimer > 0) {
         lostMessageTimer -= dt;
         if (lostMessageTimer < 0) lostMessageTimer = 0;
+      }
+      if (isRespawnPause) {
+        respawnPauseTimer -= dt;
+        if (respawnPauseTimer < 0) respawnPauseTimer = 0;
       }
 
       // モードタイマー
@@ -574,7 +595,7 @@
         }
       }
 
-      if (isTouching && !gameOver) {
+      if (isTouching && !gameOver && !isRespawnPause) {
         if (!isCurrentlyThrusting && jumpUsesLeft > 0) {
           isCurrentlyThrusting = true;
         }
@@ -644,7 +665,7 @@
       let onGroundNow = false;
       if (!onPlatform && player.vy >= 0 && playerBottom >= groundY) {
         if (isPlayerOverHole(player) && invincibleTimer <= 0) {
-          damagePlayer();
+          damagePlayer({ respawnFromTop: true });
         }
         player.y = groundY - player.height;
         player.vy = 0;
@@ -655,7 +676,7 @@
 
       player.onGround = onGroundNow || onPlatform;
 
-      // 画面下落下
+      // 画面下落下 → ロスト＋上から
       if (player.y > canvas.height && invincibleTimer <= 0) {
         damagePlayer({ respawnFromTop: true });
       }
@@ -668,7 +689,7 @@
         }
       }
 
-      // --- 背景オブジェクトの移動 ---
+      // --- 背景オブジェクトの移動（ロスト中も位置は維持） ---
       function moveAndFilter(list) {
         return list
           .map(obj => {
@@ -717,44 +738,39 @@
         }
       }
 
-      // 壁に押されて左画面外に出たらロスト＋上から新しい自分
+      // 壁に押されて左画面外 → ロスト＋上から新しい自分
       if (player.x + player.width < 0 && invincibleTimer <= 0) {
         damagePlayer({ respawnFromTop: true });
-        // respawnFromTop 内で位置は上に再配置される
         playerRect.x = player.x;
         playerRect.y = player.y;
       }
 
-      // 壁から抜けて、かつ左に寄ったままなら右に戻す
-      if (!pushedByWall && player.x < playerBaseX) {
-        const returnSpeed = 300; // 右に戻る速さ
+      // 壁から抜けて左に寄っているとき → 自動で基準位置に戻る
+      if (!pushedByWall && player.x < playerBaseX && !isRespawnPause) {
+        const returnSpeed = 300;
         player.x += returnSpeed * dt;
         if (player.x > playerBaseX) player.x = playerBaseX;
         playerRect.x = player.x;
       }
 
       // --- 敵との当たり判定 ---
-      // 共通処理：自転車かどうかで挙動を分ける
       function handleEnemyHit() {
         if (isBikeMode) {
-          // 自転車中はロストせず、人間モードに戻るだけ
+          // 自転車中はロストせず、人間に戻るだけ
           isBikeMode = false;
           bikeTimer = 0;
           if (!isChickMode) player.emoji = "🏃‍♂️";
         } else if (invincibleTimer <= 0) {
-          damagePlayer();
+          damagePlayer({ respawnFromTop: true });
         }
       }
 
-      // 亀
       for (const t of turtles) {
         if (rectsOverlap(playerRect, t)) {
           handleEnemyHit();
           break;
         }
       }
-
-      // キノコ
       if (!gameOver) {
         for (const m of mushrooms) {
           if (rectsOverlap(playerRect, m)) {
@@ -763,8 +779,6 @@
           }
         }
       }
-
-      // 空の敵（鳥・爆弾・唐辛子）
       if (!gameOver) {
         for (const b of birds) {
           if (rectsOverlap(playerRect, b)) {
@@ -774,14 +788,14 @@
         }
       }
 
-      // --- アイテム取得（＋フローティングテキスト） ---
+      // --- アイテム取得 ---
       if (!gameOver) {
         items = items.filter(item => {
           if (rectsOverlap(playerRect, item)) {
             let text = "";
             if (item.type === "score") {
               score += 10;
-              playItemSound();
+              playScoreItemSound();
               text = "+10";
             } else if (item.type === "chick") {
               activateChickMode();
@@ -789,8 +803,8 @@
             } else if (item.type === "bike") {
               const wasBike = isBikeMode;
               if (wasBike) {
-                // 自転車中に自転車を取ったら +20
                 score += 20;
+                playBikeBonusSound();
                 text = "+20";
               } else {
                 text = "🚴";
@@ -809,8 +823,8 @@
         });
       }
 
-      // スコア（生存時間）
-      if (!gameOver) {
+      // スコア（生存時間）※ロスト演出中は増やさない
+      if (!gameOver && !isRespawnPause) {
         score += dt * 5;
       }
 
@@ -818,7 +832,7 @@
       const inNormalMode = !isBikeMode && !isChickMode;
       let rollDir = 1;
       if (isBikeMode || inNormalMode) {
-        // 左右反転で描画するモードでは、見た目前転になるように逆回転
+        // 左右反転描画なので見た目前転になるように符号反転
         rollDir = -1;
       }
       const ROLL_SPEED = 4.0;
@@ -831,12 +845,21 @@
         return ft.life > 0;
       });
 
-      // オブジェクト生成
-      spawnTimer += dt;
-      if (spawnTimer >= nextSpawnTime) {
-        spawnObject();
-        spawnTimer = 0;
-        nextSpawnTime = randomRange(0.8, 1.6);
+      // オブジェクト生成（ロスト一時停止中は進めない）
+      if (!isRespawnPause) {
+        spawnTimer += dt;
+        if (spawnTimer >= nextSpawnTime) {
+          spawnObject();
+          spawnTimer = 0;
+          nextSpawnTime = randomRange(0.8, 1.6);
+        }
+      }
+
+      // リスポーン一時停止解除条件：
+      // ・タイマーが切れている
+      // ・プレイヤーが地面に着地している
+      if (isRespawnPause && respawnPauseTimer <= 0 && player.onGround) {
+        isRespawnPause = false;
       }
 
       prevIsTouching = isTouching;
@@ -874,7 +897,7 @@
         ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
       }
 
-      // プレイヤー（回転＋右向き表示）
+      // プレイヤー（回転＋右向き）
       const cx = player.x + player.width / 2;
       const cy = player.y + player.height / 2;
       ctx.save();
@@ -882,7 +905,7 @@
 
       const inNormalMode = !isBikeMode && !isChickMode;
       if (isBikeMode || inNormalMode) {
-        ctx.scale(-1, 1);  // 右向き
+        ctx.scale(-1, 1);
       }
 
       ctx.rotate(player.angle);
@@ -892,7 +915,7 @@
       ctx.fillText(player.emoji, 0, 0);
       ctx.restore();
 
-      // 敵たち
+      // 敵
       ctx.font = "28px system-ui";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -924,21 +947,21 @@
         ctx.restore();
       }
 
-      // ライフ（ハート）
+      // ライフ
       ctx.fillStyle = "#ff0000";
       ctx.font = "24px system-ui";
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillText("❤️".repeat(lives), 10, 10);
 
-      // スコア（右上）
+      // スコア
       ctx.fillStyle = "#000000";
       ctx.font = "20px system-ui";
       ctx.textAlign = "right";
       ctx.textBaseline = "top";
       ctx.fillText("Score: " + Math.floor(score), canvas.width - 16, 10);
 
-      // ロスト表示（ゲームオーバーとは別）
+      // ロスト表示（Game Over とは別）
       if (lostMessageTimer > 0 && !gameOver) {
         ctx.save();
         ctx.fillStyle = "rgba(0,0,0,0.4)";
@@ -951,7 +974,7 @@
         ctx.restore();
       }
 
-      // ゲームオーバー
+      // ゲームオーバー表示
       if (gameOver) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
