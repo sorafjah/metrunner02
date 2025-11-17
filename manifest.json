@@ -1,14 +1,29 @@
 {
   "name": "ララランナー",
   "short_name": "ララランナー",
-  "start_url": ".",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#87ceeb",
   "theme_color": "#87ceeb",
   "icons": [
     {
-      "src": "https://placehold.co/192x192/87ceeb/000000?text=%F0%9F%8F%83%E2%80%8D%E2%99%82%EF%B8%8F",
-      "sizes": "192x192",
+      "src": "metrunner01-120.png",
+      "sizes": "120x120",
+      "type": "image/png"
+    },
+    {
+      "src": "metrunner01-152.png",
+      "sizes": "152x152",
+      "type": "image/png"
+    },
+    {
+      "src": "metrunner01-167.png",
+      "sizes": "167x167",
+      "type": "image/png"
+    },
+    {
+      "src": "metrunner01-180.png",
+      "sizes": "180x180",
       "type": "image/png"
     }
   ]
