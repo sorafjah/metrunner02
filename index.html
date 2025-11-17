@@ -132,7 +132,8 @@
     let showInstructions = false;
     let instructionTimer = 0;
     const INSTRUCTION_DURATION = 2.0;
-    const instructionText = "走り方\n画面を押すとジャンプ\n1回だけ２段ジャンプできる\n長押しでロングジャンプ\n下になぞると即落ち";
+    // ★「走り方」を削除
+    const instructionText = "画面を押すとジャンプ\n1回だけ２段ジャンプできる\n長押しでロングジャンプ\n下になぞると即落ち";
 
     // ==========================
     // ハイスコアのロード（ローカル保存）
@@ -496,7 +497,6 @@
         return;
       } else {
         // 敵ヒット・壁クラッシュ
-        // ぴょーんと上に飛んでから画面下へ
         player.vy = -400;
         player.onGround = false;
         jumpUsesLeft = 0;
@@ -606,7 +606,7 @@
         }
       } else if (type === "turtle") {
         const h = 32;
-        const baseY = groundY - h;
+        const baseY = getGroundY() - h;
         let amp = randomRange(10, 30);
         if (Math.random() < 0.30) {
           amp *= 3;
@@ -1240,16 +1240,16 @@
       }
 
       // プレイヤー回転
-      // ⭐無敵中は反時計回りに高速回転
+      // ⭐無敵中は必ず反時計回りに高速回転
       if (isStarMode) {
-        const starRollSpeed = 12.0;     // 高速
-        player.angle += -starRollSpeed * dt; // 反時計回り（Canvasは負が反時計）
+        const starRollSpeed = 12.0;
+        player.angle += -starRollSpeed * dt; // 反時計回り（Canvasは負が逆方向）
       } else {
         const inNormalMode = !isBikeMode && !isChickMode;
         let rollDir = 0;
         const baseSpeed = 4.0;
         if (isBikeMode || inNormalMode) {
-          rollDir = -1; // 通常は時計回り気味
+          rollDir = -1;
         } else {
           rollDir = 1;
         }
@@ -1263,9 +1263,9 @@
         return ft.life > 0;
       });
 
-      // オブジェクト生成（⭐中は2倍ペース）
+      // オブジェクト生成（⭐中は3倍ペースで敵＆アイテム大量）
       if (!isRespawnPause && !isShaking) {
-        spawnTimer += dt * (isStarMode ? 2 : 1);
+        spawnTimer += dt * (isStarMode ? 3 : 1);
         if (spawnTimer >= nextSpawnTime) {
           spawnObject();
           spawnTimer = 0;
@@ -1351,7 +1351,7 @@
 
       ctx.rotate(player.angle);
 
-      // ⭐無敵中は赤いオーラを付けて「赤い走ってる人」っぽく
+      // ⭐無敵中は赤いオーラ
       if (isStarMode) {
         ctx.beginPath();
         ctx.fillStyle = "rgba(255, 80, 80, 0.9)";
@@ -1383,7 +1383,7 @@
           const bcy = b.y + b.height / 2;
           ctx.save();
           ctx.translate(bcx, bcy);
-          ctx.rotate(b.angle); // ぐるぐる回転しながら移動
+          ctx.rotate(b.angle);
           ctx.fillText(b.emoji, 0, 0);
           ctx.restore();
         } else {
@@ -1524,7 +1524,6 @@
     // ==========================
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        // GitHub Pages でもそのまま "./service-worker.js" でOK
         navigator.serviceWorker.register("./service-worker.js")
           .catch(err => {
             console.log("ServiceWorker registration failed:", err);
