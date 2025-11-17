@@ -11,8 +11,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="ララランナー">
 
-  <!-- アイコン -->
-  <link rel="apple-touch-icon" href="https://placehold.co/192x192/87ceeb/000000?text=%F0%9F%8F%83%E2%80%8D%E2%99%82%EF%B8%8F">
+  <!-- iPhone / iPad アイコン（同じフォルダに metrunner01-180.png を置く） -->
+  <link rel="apple-touch-icon" href="metrunner01-180.png">
+  <!-- PWA manifest -->
   <link rel="manifest" href="manifest.json">
   
   <style>
@@ -117,13 +118,13 @@
     // --- 直前にやられた位置 ---
     let lastDeathAvoidCenterX = null;
 
-    // 8. 唐辛子 震え処理
+    // 唐辛子 震え処理
     let isShaking = false;
     let shakeTimer = 0;
-    const SHAKE_DURATION = 2.0; // ★ しびれ2秒
+    const SHAKE_DURATION = 2.0; // しびれ2秒
     let shakeOffsetX = 0;
 
-    // 9. ゲームオーバー表示タイマー
+    // ゲームオーバー表示タイマー
     let gameOverDisplayTimer = 0;
     const GAME_OVER_DISPLAY_DURATION = 3.0;
 
@@ -132,6 +133,18 @@
     let instructionTimer = 0;
     const INSTRUCTION_DURATION = 2.0;
     const instructionText = "走り方\n画面を押すとジャンプ\n1回だけ２段ジャンプできる\n長押しでロングジャンプ\n下になぞると即落ち";
+
+    // ==========================
+    // ハイスコアのロード（ローカル保存）
+    // ==========================
+    try {
+      const saved = localStorage.getItem("lalarunner_highscore");
+      if (saved !== null) {
+        highScore = parseFloat(saved) || 0;
+      }
+    } catch (e) {
+      highScore = 0;
+    }
 
     // ==========================
     // サウンド
@@ -451,6 +464,9 @@
       if (lives <= 0) {
         if (score > highScore) {
           highScore = score;
+          try {
+            localStorage.setItem("lalarunner_highscore", highScore);
+          } catch (e) {}
         }
         gameOver = true;
         gameOverDisplayTimer = GAME_OVER_DISPLAY_DURATION;
@@ -642,7 +658,7 @@
           birds.push({
             x, y, width: 40, height: h, emoji,
             isBat: false, isVortex: true,
-            angle: 0, rotationSpeed: -5.0
+            angle: 0, rotationSpeed: -10.0 // ぐるぐる高速回転しながら移動
           });
         } else {
           birds.push({
@@ -652,7 +668,7 @@
         }
       } else if (type === "bee") {
         const baseY = randomRange(80, groundY - 140);
-        const amp = randomRange(20, 50);
+        const amp = randomRange(40, 70); // サインカーブを大きめに
         const omega = randomRange(2, 4);
         bees.push({
           x, baseY, y: baseY,
@@ -1016,7 +1032,7 @@
       bees = moveAndFilter(bees);
       for (const bee of bees) {
         bee.phase += bee.omega * dt;
-        bee.y = bee.baseY + bee.amp * Math.sin(bee.phase);
+        bee.y = bee.baseY + bee.amp * Math.sin(bee.phase); // サインカーブ
       }
 
       ghosts = ghosts.filter(g => {
@@ -1071,10 +1087,15 @@
         }
       }
 
-      // 壁に押し出されて画面外
-      if (player.x + player.width < 0 && invincibleTimer <= 0) {
+      // 壁に押し出されて画面外（連続ロストしないようフラグ確認）
+      if (
+        player.x + player.width < 0 &&
+        invincibleTimer <= 0 &&
+        !isRespawnPause &&
+        !pendingRespawn
+      ) {
         lastDeathAvoidCenterX = player.x + player.width / 2;
-        damagePlayer();
+        damagePlayer();  // 壁ロスト
         playerRect.x = player.x;
         playerRect.y = player.y;
       }
@@ -1219,23 +1240,21 @@
       }
 
       // プレイヤー回転
-      const inNormalMode = !isBikeMode && !isChickMode;
-      let baseDir = 1;
-      if (isBikeMode || inNormalMode) {
-        baseDir = -1;
-      } else {
-        baseDir = 1;
-      }
-      let rollDir = baseDir;
-      let rollSpeed = 4.0;
-
-      // 無敵の間は高速・反時計回り
+      // ⭐無敵中は反時計回りに高速回転
       if (isStarMode) {
-        rollDir = -1;       // 反時計回り
-        rollSpeed = 10.0;   // 高速
+        const starRollSpeed = 12.0;     // 高速
+        player.angle += -starRollSpeed * dt; // 反時計回り（Canvasは負が反時計）
+      } else {
+        const inNormalMode = !isBikeMode && !isChickMode;
+        let rollDir = 0;
+        const baseSpeed = 4.0;
+        if (isBikeMode || inNormalMode) {
+          rollDir = -1; // 通常は時計回り気味
+        } else {
+          rollDir = 1;
+        }
+        player.angle += rollDir * baseSpeed * dt;
       }
-
-      player.angle += rollDir * rollSpeed * dt;
 
       // フローティングテキスト
       floatTexts = floatTexts.filter(ft => {
@@ -1246,7 +1265,7 @@
 
       // オブジェクト生成（⭐中は2倍ペース）
       if (!isRespawnPause && !isShaking) {
-        spawnTimer += dt * (isStarMode ? 2 : 1); // ★ 2倍
+        spawnTimer += dt * (isStarMode ? 2 : 1);
         if (spawnTimer >= nextSpawnTime) {
           spawnObject();
           spawnTimer = 0;
@@ -1331,9 +1350,19 @@
       }
 
       ctx.rotate(player.angle);
+
+      // ⭐無敵中は赤いオーラを付けて「赤い走ってる人」っぽく
+      if (isStarMode) {
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(255, 80, 80, 0.9)";
+        ctx.arc(0, 0, 26, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       ctx.font = "32px system-ui";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+      ctx.fillStyle = "#000000";
       ctx.fillText(player.emoji, 0, 0);
       ctx.restore();
 
@@ -1354,7 +1383,7 @@
           const bcy = b.y + b.height / 2;
           ctx.save();
           ctx.translate(bcx, bcy);
-          ctx.rotate(b.angle);
+          ctx.rotate(b.angle); // ぐるぐる回転しながら移動
           ctx.fillText(b.emoji, 0, 0);
           ctx.restore();
         } else {
@@ -1495,6 +1524,7 @@
     // ==========================
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
+        // GitHub Pages でもそのまま "./service-worker.js" でOK
         navigator.serviceWorker.register("./service-worker.js")
           .catch(err => {
             console.log("ServiceWorker registration failed:", err);
